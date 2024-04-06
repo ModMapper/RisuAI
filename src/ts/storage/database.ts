@@ -560,7 +560,7 @@ export interface Database{
     mancerHeader:string
     emotionProcesser:'submodel'|'embedding',
     showMenuChatList?:boolean,
-    translatorType:'google'|'deepl'|'none'|'llm'|'deeplX',
+    translatorType:'google'|'deepl'|'none'|'llm'|'deeplX'|'plugin',
     NAIadventure?:boolean,
     NAIappendName?:boolean,
     deeplOptions:{

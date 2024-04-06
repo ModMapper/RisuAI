@@ -59,6 +59,7 @@
         <OptionInput value="deepl" >DeepL</OptionInput>
         <OptionInput value="llm" >Ax. Model</OptionInput>
         <OptionInput value="deeplX" >DeepL X</OptionInput>
+        <OptionInput value="plugin" >Plugin</OptionInput>
     </SelectInput>
 
     {#if $DataBase.translatorType === 'deepl'}
