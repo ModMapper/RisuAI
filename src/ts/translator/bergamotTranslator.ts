@@ -1,5 +1,5 @@
-import { LatencyOptimisedTranslator, TranslatorBacking } from "@browsermt/bergamot-translator";
-import { gunzipSync } from 'fflate';
+import { BatchTranslator, TranslatorBacking } from "@browsermt/bergamot-translator";
+import { globalFetch } from "../globalApi.svelte";
 
 // Cache Translations Models
 class CacheDB {
@@ -77,66 +77,66 @@ class FirefoxBacking extends TranslatorBacking {
     downloadTimeout: number;
 
     constructor(options?) {
-        const registryUrl = 'https://raw.githubusercontent.com/mozilla/firefox-translations-models/refs/heads/main/registry.json';
-        options = options || {};
-        options.registryUrl = options.registryUrl || registryUrl;
         super(options);
         this.cache = new CacheDB("firefox-translations-models");
     }
 
     async loadModelRegistery() {
-        const modelUrl = 'https://media.githubusercontent.com/media/mozilla/firefox-translations-models/refs/heads/main/models';
-        const registry = await super.loadModelRegistery();
-        for (const entry of registry) {
-            for(const name in entry.files) {
-                const file = entry.files[name];
-                file.name = `${modelUrl}/${file.modelType}/${entry.from}${entry.to}/${file.name}.gz`;
-            }
+        const recordUrl = 'https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/translations-models/records';
+        const modelUrl = 'https://firefox-settings-attachments.cdn.mozilla.net/';
+        const res = await fetch(recordUrl, { method: 'GET' });
+        const json = await res.json();
+
+        const registery = {};
+        for (const item of json.data) {
+            const lang = item.fromLang + item.toLang;
+            const model = registery[lang] ??= { from: item.fromLang, to: item.toLang };
+            model.files ??= {};
+            model.files[item.fileType] = {
+                name: modelUrl + item.attachment.location,
+                size : item.attachment.size,
+                expectedSha256Hash: item.attachment.hash
+            };
         }
-        return registry;
+        return Array.from(Object.values(registery));
     }
 
     async fetch(url, checksum, extra) {
         const cacheBuffer = await this.cache.load(url, checksum);
+        console.log(url, cacheBuffer);
         if (cacheBuffer) { return cacheBuffer; }
-        const res = await fetch(url, {
-            credentials: 'omit',
-        });
-        // Decompress GZip
-        const buffer = await res.arrayBuffer();
-        const decomp = await decompressGZip(buffer);
-        await this.cache.save(url, checksum, decomp);
-        return decomp;
-    }
-}
 
-async function decompressGZip(buffer:ArrayBuffer) {
-    if (typeof DecompressionStream !== "undefined") {
-        const decompressor = new DecompressionStream('gzip');
-        const stream = new Response(buffer).body.pipeThrough(decompressor);
-        return await new Response(stream).arrayBuffer();
-    } else {    // GZip decompression fallback
-        return gunzipSync(new Uint8Array(buffer)).buffer;
+        // Fetch
+        const res = await globalFetch(url, {
+            method: "GET",
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+                "Accept": "*/*",
+            },
+            rawResponse: true,
+        });
+        if(!res.ok) {
+            throw res.data;
+        }
+
+        // Save cache
+        const buffer = res.data.buffer;
+        await this.cache.save(url, checksum, buffer);
+        return buffer;
     }
 }
 
 let translator = null;
-let translateTask = null;
 
 // Translate
 export async function bergamotTranslate(text:string, from:string, to:string, html:boolean|null) {
-    translator ??= new LatencyOptimisedTranslator({}, new FirefoxBacking())
-    const result = await (translateTask = translate());
-    return result.target.text;
+    translator ??= new BatchTranslator({ batchSize: 1 }, new FirefoxBacking());
 
-    // Wait for previous tasks...
-    async function translate() {
-        await translateTask;
-        return translator.translate({
-            from: from, to: to,
-            text: text, html: html,
-        });
-    }
+    const translate = await translator.translate({
+        from: from, to: to,
+        text: text, html: html,
+    });
+    return translate.target.text;
 }
 
 // Clear Cache
